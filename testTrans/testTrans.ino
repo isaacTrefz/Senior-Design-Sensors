@@ -9,10 +9,10 @@
 BluetoothSerial SerialBT;
 
 // Pin configuration for Load Cells
-#define DOUT 23
-#define CLK 22
-#define DOUT2 19
-#define CLK2 18
+#define DOUT 22
+#define CLK 23
+#define DOUT2 18
+#define CLK2 19
 
 HX711 scale;
 HX711 scale2;
