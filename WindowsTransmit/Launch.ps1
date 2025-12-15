@@ -1,76 +1,57 @@
-# 1. Check if Python is installed
-try {
-    $pythonVersion = python --version 2>&1
-    Write-Host "Found $pythonVersion" -ForegroundColor Green
-} catch {
-    Write-Host "Python is not installed or not in your PATH." -ForegroundColor Red
-    Write-Host "Please install Python from python.org and check 'Add Python to PATH' during installation."
+# 3. & 4. Auto-Detect the Correct Bluetooth Port
+Write-Host "Scanning for ESP32 Bluetooth ports..." -ForegroundColor Cyan
+
+# Get all ports that look like Bluetooth standard serial links
+$potentialPorts = Get-PnpDevice -Class Ports -Present | 
+    Where-Object { $_.FriendlyName -match 'Standard Serial' -or $_.FriendlyName -match 'Bluetooth' }
+
+$validPort = $null
+
+if ($potentialPorts.Count -eq 0) {
+    Write-Host "No Bluetooth ports found. Is the ESP32 paired?" -ForegroundColor Red
     Pause
     exit
 }
 
-# 2. Install the required library (pyserial) automatically
-Write-Host "Checking/Installing required library (pyserial)..." -ForegroundColor Cyan
-pip install pyserial | Out-Null
-
-# 3. Find Bluetooth COM Ports
-Write-Host "Scanning for Bluetooth COM ports..." -ForegroundColor Cyan
-# Get devices that look like Serial ports
-$ports = Get-PnpDevice -Class Ports -Present | Where-Object { $_.FriendlyName -match '\(COM' }
-
-# Filter for Bluetooth if possible, or list all standard ports
-$bluetoothPorts = $ports | Where-Object { $_.FriendlyName -match 'Bluetooth' -or $_.FriendlyName -match 'Standard Serial' }
-
-if ($bluetoothPorts.Count -eq 0) {
-    Write-Host "No Bluetooth serial ports found!" -ForegroundColor Red
-    Write-Host "Make sure your ESP32 is paired to Windows in Settings > Devices."
-    Pause
-    exit
-}
-
-# 4. Select the Port
-$selectedPort = ""
-if ($bluetoothPorts.Count -eq 1) {
-    # If only one Bluetooth port is found, verify it's the right one (outgoing)
-    $p = $bluetoothPorts[0]
-    # Extract COM number (e.g., COM4)
+# Iterate through each port and test it using a quick Python connection
+foreach ($p in $potentialPorts) {
     if ($p.FriendlyName -match '\((COM\d+)\)') {
-        $selectedPort = $matches[1]
-    }
-    Write-Host "Auto-detected Bluetooth Device on $selectedPort" -ForegroundColor Green
-} else {
-    # If multiple ports, ask the user to pick one
-    Write-Host "Multiple Bluetooth ports found. Usually, the 'Outgoing' one is correct." -ForegroundColor Yellow
-    for ($i = 0; $i -lt $bluetoothPorts.Count; $i++) {
-        Write-Host "[$i] $($bluetoothPorts[$i].FriendlyName)"
-    }
-    $selection = Read-Host "Enter the number of your device (e.g., 0 or 1)"
-    if ($bluetoothPorts[$selection].FriendlyName -match '\((COM\d+)\)') {
-        $selectedPort = $matches[1]
+        $testPort = $matches[1]
+        Write-Host "Testing $testPort... " -NoNewline
+        
+        # We use a tiny python command to try opening the port for 1 second
+        $command = "import serial; s = serial.Serial('$testPort', baudrate=115200, timeout=1); s.close()"
+        
+        try {
+            # Run the test command via Python, suppressing error output
+            python -c $command 2>$null
+            
+            # Check the exit code of the last command
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Success!" -ForegroundColor Green
+                $validPort = $testPort
+                break # We found it, stop searching
+            } else {
+                Write-Host "Failed (Likely 'Incoming' port or device off)" -ForegroundColor DarkGray
+            }
+        } catch {
+            Write-Host "Error" -ForegroundColor Red
+        }
     }
 }
 
-if ([string]::IsNullOrWhiteSpace($selectedPort)) {
-    Write-Host "Could not determine the COM port." -ForegroundColor Red
+if ([string]::IsNullOrWhiteSpace($validPort)) {
+    Write-Host "`nCould not automatically connect to any ESP32 port." -ForegroundColor Red
+    Write-Host "Ensure the ESP32 is POWERED ON and PAIRED."
     Pause
     exit
 }
 
-# 5. Modify Read.py to use the selected port
-$pythonFile = ".\Read.py"
-if (Test-Path $pythonFile) {
-    $content = Get-Content $pythonFile
-    # Regex to find SERIAL_PORT = '...' and replace it
-    $newContent = $content -replace "SERIAL_PORT\s*=\s*['`"].*['`"]", "SERIAL_PORT = '$selectedPort'"
-    $newContent | Set-Content $pythonFile
-    Write-Host "Configured Read.py to use $selectedPort" -ForegroundColor Green
-} else {
-    Write-Host "Could not find Read.py in this folder!" -ForegroundColor Red
-    Pause
-    exit
-}
+Write-Host "Target Locked: $validPort" -ForegroundColor Green
+Write-Host "----------------------------------------"
+Write-Host "Launching Data Reader..." -ForegroundColor Cyan
 
-# 6. Run the Python Script
-Write-Host "Starting Data Stream..." -ForegroundColor Cyan
-Write-Host "Press Ctrl+C to stop."
-python Read.py
+# --- NEW CODE START ---
+# Launch Read.py and pass the found port as an argument
+python Read.py $validPort
+# --- NEW CODE END ---

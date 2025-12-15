@@ -1,13 +1,16 @@
 import sys
 import serial
+import time
 
-# ... existing imports ...
+BAUD_RATE = 115200
 
-if sys.platform.startswith('win'):
-    SERIAL_PORT = 'COM4' # You still need to know your Windows COM port
+# LOGIC CHANGE: Check if a port was passed via command line (from PowerShell)
+if len(sys.argv) > 1:
+    SERIAL_PORT = sys.argv[1]
+    print(f"received port from launcher: {SERIAL_PORT}")
 else:
-    SERIAL_PORT = '/dev/rfcomm0'
-    
+    # Fallback if run manually without arguments
+    SERIAL_PORT = 'COM8' 
 
 def read_bluetooth_data():
     print(f"Attempting to connect to {SERIAL_PORT}...")
@@ -20,11 +23,11 @@ def read_bluetooth_data():
 
         while True:
             if ser.in_waiting > 0:
-                # Read line, decode bytes to string, strip whitespace
-                line = ser.readline().decode('utf-8').strip()
-                
-                if line:
-                    try:
+                try:
+                    # Read line, decode bytes to string, strip whitespace
+                    line = ser.readline().decode('utf-8').strip()
+                    
+                    if line:
                         # Parse the CSV format "load1,load2,a1,a2,a3,a4"
                         parts = line.split(',')
                         
@@ -43,10 +46,14 @@ def read_bluetooth_data():
                             # Display data
                             print(f"Load: {load1:<8} {load2:<8} | Analog: {a1:<5} {a2:<5} {a3:<5} {a4:<5}")
                         else:
-                            print(f"Malformed packet (len={len(parts)}): {line}")
+                            # Optional: silence malformed packets to keep console clean
+                            pass
                             
-                    except ValueError:
-                        print(f"Error parsing data: {line}")
+                except ValueError:
+                    print(f"Error parsing data: {line}")
+                except UnicodeDecodeError:
+                    # Common in serial comms on startup
+                    pass
                         
     except serial.SerialException as e:
         print(f"\nCould not open serial port {SERIAL_PORT}.")
